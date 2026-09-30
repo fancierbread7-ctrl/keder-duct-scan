@@ -120,7 +120,8 @@ function showResult(r, el) {
 /* ---------- server ---------- */
 async function post(code) {
   const res = await fetch(API, { method: 'POST', body: JSON.stringify({ code }) }); // text/plain: no CORS preflight
-  return res.json();
+  // Apps Script answers with an HTML sign-in page until the owner has run setup()
+  try { return await res.json(); } catch (e) { throw new Error('backend'); }
 }
 
 async function handle(raw) {
@@ -138,7 +139,8 @@ async function handle(raw) {
     showResult(r, el);
   } catch (e) {
     queue(p.code);
-    toast('warn', 'NO SIGNAL — SAVED ON PHONE', label(p), 'will send automatically', el);
+    toast('warn', e.message === 'backend' ? 'SERVER NOT SET UP — SAVED ON PHONE' : 'NO SIGNAL — SAVED ON PHONE',
+          label(p), 'will send automatically', el);
   } finally {
     inflight.delete(p.code);
   }
