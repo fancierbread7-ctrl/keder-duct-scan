@@ -1,6 +1,6 @@
 // Makes the app installable and opens it with no signal. Only the app shell is
 // cached; scans always go to the network (the page queues them when offline).
-const CACHE = 'duct-scan-v1';
+const CACHE = 'duct-scan-v2';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -17,7 +17,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== location.origin) return;
-  e.respondWith(fetch(e.request)
+  // no-cache: revalidate with GitHub every time instead of trusting its 10-minute max-age,
+  // or a phone keeps running the old page for up to 10 minutes after a push
+  e.respondWith(fetch(e.request, { cache: 'no-cache' })
     .then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r; })
     .catch(() => caches.match(e.request, { ignoreSearch: true })));
 });
