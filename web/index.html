@@ -119,7 +119,10 @@ function showResult(r, el) {
 
 /* ---------- server ---------- */
 async function post(code) {
-  const res = await fetch(API, { method: 'POST', body: JSON.stringify({ code }) }); // text/plain: no CORS preflight
+  let res;
+  try { res = await fetch(API, { method: 'POST', body: JSON.stringify({ code }) }); } // text/plain: no CORS preflight
+  // online but refused: Google's Access Denied page carries no CORS header, so it surfaces as a network error
+  catch (e) { throw new Error(navigator.onLine ? 'backend' : 'offline'); }
   // Apps Script answers with an HTML sign-in page until the owner has run setup()
   try { return await res.json(); } catch (e) { throw new Error('backend'); }
 }
@@ -139,7 +142,7 @@ async function handle(raw) {
     showResult(r, el);
   } catch (e) {
     queue(p.code);
-    toast('warn', e.message === 'backend' ? 'SERVER NOT SET UP — SAVED ON PHONE' : 'NO SIGNAL — SAVED ON PHONE',
+    toast('warn', e.message === 'backend' ? 'SERVER REFUSED — SAVED ON PHONE' : 'NO SIGNAL — SAVED ON PHONE',
           label(p), 'will send automatically', el);
   } finally {
     inflight.delete(p.code);
