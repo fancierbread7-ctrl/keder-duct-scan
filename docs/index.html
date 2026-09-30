@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Duct Scan">
+<title>Duct Scan</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root{ --bg:#0b0f14; --ink:#fff; --ok:#15803d; --dup:#dc2626; --warn:#b45309; --wait:#334155; }
+  *{box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent}
+  html,body{height:100%; background:var(--bg); color:var(--ink); overflow:hidden;
+    font:16px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  video{position:fixed; inset:0; width:100%; height:100%; object-fit:cover; background:#000}
+  .top{position:fixed; top:0; left:0; right:0; display:flex; justify-content:space-between;
+    align-items:center; padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+    background:linear-gradient(#000a,#0000); font-weight:700; font-size:14px; z-index:2}
+  .dot{display:inline-block; width:9px; height:9px; border-radius:50%; background:#22c55e;
+    margin-right:7px; box-shadow:0 0 0 0 #22c55e88; animation:pulse 1.6s infinite}
+  .dot.off{background:#f59e0b; animation:none}
+  @keyframes pulse{70%{box-shadow:0 0 0 8px #22c55e00}}
+  .count{font-variant-numeric:tabular-nums; opacity:.85}
+  .aim{position:fixed; left:8%; right:8%; top:34%; height:18%; border:2px solid #ffffffb0;
+    border-radius:14px; box-shadow:0 0 0 100vmax #0006; z-index:1; pointer-events:none}
+  .toasts{position:fixed; left:0; right:0; bottom:0; padding:0 12px calc(14px + env(safe-area-inset-bottom));
+    display:flex; flex-direction:column-reverse; gap:8px; z-index:3; pointer-events:none}
+  .toast{border-radius:16px; padding:14px 16px; background:var(--wait);
+    box-shadow:0 8px 24px #0008; animation:in .15s ease-out}
+  .toast.ok{background:var(--ok)} .toast.dup{background:var(--dup)} .toast.warn{background:var(--warn)}
+  .toast .h{font-size:13px; font-weight:800; letter-spacing:.12em; opacity:.9}
+  .toast .m{font-size:26px; font-weight:800; margin-top:2px; font-variant-numeric:tabular-nums}
+  .toast .s{font-size:15px; opacity:.92; margin-top:2px}
+  .toast.out{opacity:0; transform:translateY(8px); transition:.25s}
+  @keyframes in{from{opacity:0; transform:translateY(12px)}}
+  .msg{position:fixed; inset:0; display:none; place-items:center; text-align:center; padding:24px; z-index:4;
+    background:var(--bg)}
+  .msg.show{display:grid} .msg b{display:block; font-size:22px; margin-bottom:8px}
+</style>
+</head>
+<body>
+<video id="v" playsinline muted autoplay></video>
+<div class="aim"></div>
+<div class="top"><span><span id="dot" class="dot"></span><span id="st">Starting camera…</span></span>
+  <span class="count" id="count"></span></div>
+<div class="toasts" id="toasts"></div>
+<div class="msg" id="msg"></div>
+
+<script type="module">
+// The Apps Script /exec URL (backend/Code.js). Set by `python build.py <url>`.
+const API = '__API__';
+
+const LINGER_MS = 3000;   // how long a result stays on screen
+const GONE_MS = 1500;     // a label must leave the frame this long before it counts as a new scan
+const FORMATS = ['code_128', 'code_39', 'code_93', 'codabar', 'qr_code', 'data_matrix'];
+
+const $ = id => document.getElementById(id);
+const done = new Map();      // code -> 'h:mm:ss a' already in the sheet
+const inflight = new Set();
+const lastSeen = new Map();  // raw text -> last frame it was in
+let sessionCount = 0;
+
+// Same rule as parseCode() in Code.js - keep the two in step.
+function parseCode(raw) {
+  const s = String(raw || '').toUpperCase().replace(/\s+/g, '');
+  const m = /^([A-Z]{3})-?0*(\d+)$/.exec(s);
+  return m ? { finisher: m[1], item: m[2], code: m[1] + '-' + m[2] } : null;
+}
+
+/* ---------- feedback ---------- */
+let ac;
+function beep(ok) {
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = ok ? 'sine' : 'square';
+    o.frequency.value = ok ? 1400 : 220;
+    g.gain.value = 0.15;
+    o.connect(g).connect(ac.destination);
+    o.start(); o.stop(ac.currentTime + (ok ? 0.08 : 0.35));
+  } catch (e) {}
+  try { navigator.vibrate && navigator.vibrate(ok ? 60 : [90, 60, 90]); } catch (e) {}
+}
+// iOS keeps audio locked until the first touch anywhere
+addEventListener('touchstart', () => { try { ac && ac.resume(); } catch (e) {} }, { passive: true });
+
+function toast(kind, head, main, sub, el) {
+  el = el || document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.innerHTML = '<div class="h"></div><div class="m"></div><div class="s"></div>';
+  el.children[0].textContent = head;
+  el.children[1].textContent = main;
+  el.children[2].textContent = sub || '';
+  if (!el.parentNode) $('toasts').prepend(el);
+  clearTimeout(el._t);
+  if (kind !== 'wait') el._t = setTimeout(() => {
+    el.classList.add('out'); setTimeout(() => el.remove(), 260);
+  }, LINGER_MS);
+  return el;
+}
+const label = p => p.finisher + '   item ' + p.item;
+
+function showResult(r, el) {
+  const p = { finisher: r.finisher, item: r.item };
+  if (r.dup) {
+    toast('dup', 'DUPLICATE — NOT ADDED', label(p), 'already entered at ' + (r.at || 'an earlier scan'), el);
+    beep(false);
+  } else {
+    toast('ok', '✓ CONFIRMED', label(p), 'entered at ' + r.at, el);
+    beep(true);
+    $('count').textContent = ++sessionCount + ' scanned';
+  }
+}
+
+/* ---------- server ---------- */
+async function post(code) {
+  const res = await fetch(API, { method: 'POST', body: JSON.stringify({ code }) }); // text/plain: no CORS preflight
+  return res.json();
+}
+
+async function handle(raw) {
+  const p = parseCode(raw);
+  if (!p) { toast('warn', 'NOT A DUCT LABEL', String(raw).slice(0, 24)); beep(false); return; }
+  if (inflight.has(p.code)) return;
+  if (done.has(p.code)) { showResult({ ...p, dup: true, at: done.get(p.code) }); return; }
+
+  inflight.add(p.code);
+  const el = toast('wait', 'SENDING…', label(p));
+  try {
+    const r = await post(p.code);
+    if (!r.ok) { toast('warn', 'NOT ADDED', label(p), r.error, el); beep(false); return; }
+    done.set(r.code, r.at);
+    showResult(r, el);
+  } catch (e) {
+    queue(p.code);
+    toast('warn', 'NO SIGNAL — SAVED ON PHONE', label(p), 'will send automatically', el);
+  } finally {
+    inflight.delete(p.code);
+  }
+}
+
+/* ---------- offline queue ---------- */
+const Q = 'duct-scan-queue';
+const readQ = () => { try { return JSON.parse(localStorage.getItem(Q) || '[]'); } catch (e) { return []; } };
+const writeQ = q => { try { localStorage.setItem(Q, JSON.stringify(q)); } catch (e) {} };
+function queue(code) { const q = readQ(); if (!q.includes(code)) { q.push(code); writeQ(q); } }
+async function flushQ() {
+  for (const code of readQ()) {
+    try {
+      const r = await post(code);
+      writeQ(readQ().filter(c => c !== code));
+      if (r.ok) { done.set(r.code, r.at); showResult(r); }
+    } catch (e) { return; }  // still offline, try later
+  }
+}
+addEventListener('online', flushQ);
+setInterval(flushQ, 15000);
+
+/* ---------- camera + detector ---------- */
+async function detector() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const have = await BarcodeDetector.getSupportedFormats();
+      const f = FORMATS.filter(x => have.includes(x));
+      if (f.includes('code_128')) return new BarcodeDetector({ formats: f });
+    } catch (e) {}
+  }
+  // iPhone Safari has no native detector: ZXing compiled to WebAssembly
+  const { BarcodeDetector: Z } = await import('https://cdn.jsdelivr.net/npm/barcode-detector@3.2.2/ponyfill/+esm');
+  return new Z({ formats: FORMATS });
+}
+
+async function camera() {
+  const s = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+  });
+  $('v').srcObject = s;
+  await $('v').play();
+  return s;
+}
+
+function fatal(title, text) {
+  $('msg').innerHTML = '<div><b></b><span></span></div>';
+  $('msg').querySelector('b').textContent = title;
+  $('msg').querySelector('span').textContent = text;
+  $('msg').classList.add('show');
+}
+
+let stream;
+async function start() {
+  if (!API.startsWith('https:')) return fatal('Not configured', 'Run build.py with the Apps Script /exec URL.');
+  try { stream = await camera(); }
+  catch (e) { return fatal('Camera blocked', 'Allow camera access for this app in your phone settings, then reopen it.'); }
+  $('st').textContent = 'Scanning';
+
+  let det;
+  try { det = await detector(); }
+  catch (e) { return fatal('Scanner failed to load', 'Check the connection and reopen the app.'); }
+
+  const v = $('v');
+  const tick = async () => {
+    if (v.readyState >= 2 && !document.hidden) {
+      try {
+        const now = performance.now();
+        for (const b of await det.detect(v)) {
+          const raw = b.rawValue;
+          const prev = lastSeen.get(raw);
+          lastSeen.set(raw, now);
+          if (!prev || now - prev > GONE_MS) handle(raw);
+        }
+      } catch (e) {}
+    }
+    setTimeout(tick, 90);
+  };
+  tick();
+
+  // seed known codes so a dup goes red instantly, then keep them fresh
+  const seed = () => fetch(API + '?codes=1').then(r => r.json())
+    // rebuilt, not merged: a row deleted from the sheet to fix a mistake can be scanned again
+    .then(d => { if (!d.ok) return; done.clear(); d.codes.forEach(([c, at]) => done.set(c, at)); })
+    .catch(() => {});
+  seed(); setInterval(seed, 60000);
+  flushQ();
+}
+
+/* keep the screen awake and the camera alive across app switches */
+let lock;
+async function wake() { try { lock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden) return;
+  wake();
+  const live = stream && stream.getVideoTracks().some(t => t.readyState === 'live');
+  if (!live) { try { stream = await camera(); } catch (e) {} }
+});
+addEventListener('online', () => $('dot').classList.remove('off'));
+addEventListener('offline', () => $('dot').classList.add('off'));
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+wake();
+start();
+</script>
+</body>
+</html>
