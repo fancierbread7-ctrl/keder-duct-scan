@@ -89,7 +89,7 @@ def main():
         {"addSheet": {"properties": {"title": "Dashboard", "index": 0,
                                      "gridProperties": {"rowCount": TEAM_ROW + 2, "columnCount": 8}}}},
         {"addSheet": {"properties": {"title": "Cycles", "index": 2,
-                                     "gridProperties": {"rowCount": 2000, "columnCount": 6, "frozenRowCount": 1}}}},
+                                     "gridProperties": {"rowCount": 50000, "columnCount": 6, "frozenRowCount": 1}}}},
     ]
     gs.batch_update(SID, reqs)
     ids = gs.sheet_ids(SID)
@@ -143,11 +143,11 @@ def main():
                                    "fields": "gridProperties(frozenRowCount,hideGridlines)"}},
         # cycles
         fmt(rng(c, 0, 1, 0, 6), {"backgroundColor": NAVY, "textFormat": white}, "backgroundColor,textFormat"),
-        fmt(rng(c, 1, 2000, 0, 1), dt, "numberFormat"),
-        fmt(rng(c, 1, 2000, 3, 4), dt, "numberFormat"),
-        fmt(rng(c, 1, 2000, 4, 5), {"numberFormat": {"type": "NUMBER", "pattern": "0.0"}}, "numberFormat"),
+        fmt(rng(c, 1, 50000, 0, 1), dt, "numberFormat"),
+        fmt(rng(c, 1, 50000, 3, 4), dt, "numberFormat"),
+        fmt(rng(c, 1, 50000, 4, 5), {"numberFormat": {"type": "NUMBER", "pattern": "0.0"}}, "numberFormat"),
         {"autoResizeDimensions": {"dimensions": {"sheetId": c, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 6}}},
-        {"addConditionalFormatRule": {"index": 0, "rule": {"ranges": [rng(c, 1, 2000, 4, 6)], "booleanRule": {
+        {"addConditionalFormatRule": {"index": 0, "rule": {"ranges": [rng(c, 1, 50000, 4, 6)], "booleanRule": {
             "condition": {"type": "CUSTOM_FORMULA", "values": [{"userEnteredValue": '=$F2="dropped (>1h)"'}]},
             "format": {"textFormat": {"foregroundColor": {"red": .6, "green": .6, "blue": .6}, "italic": True}}}}}},  # the scan still counts as a duct; only its gap is ignored
     ])
