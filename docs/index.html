@@ -47,7 +47,7 @@
 <video id="v" playsinline muted autoplay></video>
 <div class="aim"></div>
 <div class="top"><span><span id="dot" class="dot"></span><span id="st">Starting camera…</span></span>
-  <span class="count" id="count"></span></div>
+  <span class="count"><span id="count"></span> <span id="ver" style="opacity:.5"></span></span></div>
 <div class="toasts" id="toasts"></div>
 <div class="msg" id="msg"></div>
 
@@ -55,6 +55,7 @@
 // The Apps Script /exec URL (backend/Code.js). Set by `python build.py <url>`.
 const API = 'https://script.google.com/macros/s/AKfycbywbVuGB6p2s0-pXTkSdcRiTC9tvwK-71CEoG9zWz5hm0ilZGqrdHvOHN68--KV5Mxc/exec';
 
+const VERSION = 'v6';     // shown top-right: tells you at a glance which copy a phone is running
 const LINGER_MS = 3000;   // how long a result stays on screen
 const GONE_MS = 1500;     // a label must leave the frame this long before it counts as a new scan
 const FORMATS = ['code_128', 'code_39', 'code_93', 'codabar', 'qr_code', 'data_matrix'];
@@ -120,7 +121,7 @@ function showResult(r, el) {
 /* ---------- server ---------- */
 async function post(code) {
   let res;
-  try { res = await fetch(API, { method: 'POST', body: JSON.stringify({ code }) }); } // text/plain: no CORS preflight
+  try { res = await fetch(API + '?code=' + encodeURIComponent(code), { cache: 'no-store' }); }
   // online but refused: Google's Access Denied page carries no CORS header, so it surfaces as a network error
   catch (e) { throw new Error(navigator.onLine ? 'backend' : 'offline'); }
   // Apps Script answers with an HTML sign-in page until the owner has run setup()
@@ -237,8 +238,19 @@ async function start() {
 /* keep the screen awake and the camera alive across app switches */
 let lock;
 async function wake() { try { lock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+// A home-screen app is RESUMED, not reloaded, when its icon is tapped - it can run
+// an old copy for days. On every resume: ask for a newer version, and if the page
+// has been open over an hour, reload it outright. controllerchange = new version landed.
+const openedAt = Date.now();
+let reloading = false;
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('controllerchange', () => {
+  if (!reloading && !readQ().length) { reloading = true; location.reload(); }
+});
 document.addEventListener('visibilitychange', async () => {
   if (document.hidden) return;
+  try { (await navigator.serviceWorker.getRegistration())?.update(); } catch (e) {}
+  if (Date.now() - openedAt > 3600e3 && !readQ().length) return location.reload();
+  flushQ();
   wake();
   const live = stream && stream.getVideoTracks().some(t => t.readyState === 'live');
   if (!live) { try { stream = await camera(); } catch (e) {} }
@@ -247,6 +259,7 @@ addEventListener('online', () => $('dot').classList.remove('off'));
 addEventListener('offline', () => $('dot').classList.add('off'));
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+$('ver').textContent = VERSION;
 wake();
 start();
 </script>

@@ -1,6 +1,6 @@
 // Makes the app installable and opens it with no signal. Only the app shell is
 // cached; scans always go to the network (the page queues them when offline).
-const CACHE = 'duct-scan-v2';
+const CACHE = 'duct-scan-v6';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

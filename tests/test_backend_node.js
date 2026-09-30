@@ -100,8 +100,14 @@ t('GET ?codes lists every code with its time', () => {
   assert.deepStrictEqual([...r.codes.map(c => c[0])], ['DCT-1234', 'PLM-1234']);
 });
 
+t('GET ?code= records and dedupes the same as POST', () => {
+  const a = g.doGet({ parameter: { code: 'STR-9' } }); assert.strictEqual(a.dup, false);
+  const b = g.doGet({ parameter: { code: 'STR-09' } }); assert.strictEqual(b.dup, true);
+  assert.strictEqual(g.rows.length, 3);
+});
+
 t('setup is idempotent', () => {
-  g.setup(); g.setup(); assert.strictEqual(g.rows.length, 2);
+  g.setup(); g.setup(); assert.strictEqual(g.rows.length, 3);
 });
 
 console.log(pass + ' passed');

@@ -11,8 +11,14 @@
  * getUserMedia can never open the camera from an HtmlService page. The
  * scanner is a small static PWA (../web) that calls this script as a JSON API:
  *
- *   POST /exec   body {"code":"DCT-1234"}   -> record it, or report the dup
+ *   GET  /exec?code=DCT-1234                -> record it, or report the dup
  *   GET  /exec?codes=1                      -> every code already recorded
+ *   POST /exec   body {"code":"DCT-1234"}   -> same as ?code= (kept for old copies of the page)
+ *
+ * The phone records with GET, not POST: Apps Script answers every call with a
+ * 302 to script.googleusercontent.com, and home-screen web apps (iOS standalone
+ * above all) were dropping the POST-then-redirect while the same page in a
+ * browser tab was fine. A GET redirect is the plain case every browser handles.
  *
  * THE LABELS (Abraham, 2026-09-29): 3"x1" Zebra stickers, Code 128 or QR,
  * printed as ALIAS-NUMBER, e.g. DCT-1. The alias is a 3-letter code for the
@@ -89,6 +95,7 @@ function _sheet() {
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
+  if (p.code) return _json(submitScan(p.code));
   if (p.codes) return _json({ ok: true, codes: _allCodes() });
   return _json({ ok: true, app: 'keder-duct-scan', finishers: FINISHERS });
 }

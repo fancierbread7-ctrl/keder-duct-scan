@@ -8,7 +8,7 @@ this also exercises the ZXing/WebAssembly path the iPhones use.
 
     python tests/test_e2e.py
 """
-import io, json, pathlib, re, subprocess, sys, threading, functools, http.server
+import io, json, urllib.parse, pathlib, re, subprocess, sys, threading, functools, http.server
 from PIL import Image
 sys.stdout.reconfigure(encoding="utf-8")
 import barcode
@@ -55,10 +55,11 @@ url = "http://127.0.0.1:%d/" % srv.server_port
 rows = []
 def api(route):
     req = route.request
-    if req.method == "GET":
+    q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(req.url).query))
+    if "code" not in q:
         body = {"ok": True, "codes": [[c, t] for c, t in rows]}
     else:
-        m = re.match(r"^([A-Z]{3})-?0*(\d+)$", json.loads(req.post_data)["code"].upper())
+        m = re.match(r"^([A-Z]{3})-?0*(\d+)$", q["code"].upper())
         code = m.group(1) + "-" + m.group(2)
         prior = [t for c, t in rows if c == code]
         if prior:
